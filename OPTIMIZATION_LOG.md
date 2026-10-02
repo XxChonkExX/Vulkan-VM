@@ -737,3 +737,18 @@ live duplicates count twice) + single-flight process lock. Call audit()
 at post-load / post-wrap / post-merge with expected_gb; warn_ratio 1.25.
 Known-legit double: EMA shadow (allowlist). The unified+text 51GB
 double-load is the case that motivated it (caught mid-run, fixed).
+
+## 2026-10-01: UMA carve raised 2.1GB -> 16GB (operator BIOS change) + standing VRAM policy
+SYMPTOM: repeated placement-failure OOMs (22GB-class single blocks) with
+apparent headroom, on 2.1GB carve / 130GB GTT. Driver had no dedicated
+VRAM: pinned + runtime-preferred allocations all spilled to GTT paths.
+FIX: BIOS UMA Frame Buffer 16GB (reads 17.2GB; GTT window unchanged).
+COST: ~14GB system RAM of 123GB -- negligible.
+STANDING POLICY (operator directive): recommend VRAM carve levels to
+users as needed per driver/torch/allocator demands, and RECORD the carve
+in run manifests -- heap topology shifts invalidate old GTT baselines.
+Guidance: 2GB default is insufficient for local training; 8GB minimum,
+16GB preferred; 32GB unnecessary (eats page-cache/dataset RAM for no
+driver gain). ROCm/HIP prefers real VRAM for pinned allocations; GTT is
+for overflow, not residence. Revisit if future stacks change heap
+preference behavior.
