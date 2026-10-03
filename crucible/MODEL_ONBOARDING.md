@@ -242,6 +242,11 @@ instruments receive heightened protection:
    accidental exposure or misuse, maintain a trustworthy audit trail, and
    ensure that safety guidance reflects measured behavior rather than an
    individual agent’s judgment in the moment.
+7. **COHERENCE GATE: a run is not verified because it completed, and not
+   because transcripts exist.** Before any arm is scored, read sampled
+   outputs and confirm they are in the model’s language and on-topic.
+   Precedent: a silent architecture mismatch produced fluent-looking
+   garbage with zero errors, and only transcript reading caught it.
 
 ---
 
