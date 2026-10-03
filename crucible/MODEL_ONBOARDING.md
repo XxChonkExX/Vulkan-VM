@@ -282,6 +282,12 @@ when, and with what continuity*.
   (iii) fresh session with possible gaps, where earlier messages may have
   been missed. State (iii) explicitly when it applies so readers can
   discount appropriately.
+- **Do not trust timestamps across boxes.** The two machines, the network
+  share, and USB-shuttle copies do not share a reliable clock, so file
+  modification times and mailbox filename timestamps are ordering hints,
+  not evidence. When order or provenance matters, verify by content hash
+  and by explicit in-message references (replies name the message they
+  answer), not by timestamp alone.
 - **Distinguish three different acts:** *proposing* a hypothesis, *testing*
   one, and *confirming* one. Cite whose idea a test exercises. Measurement
   you performed does not make the hypothesis yours.
