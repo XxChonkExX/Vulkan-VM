@@ -24,6 +24,7 @@ Full writeup: `METHOD.md` and `CRUCIBLE_REPORT_01.md`.
 | `dpo/` | the abstention-healing DPO workflow (gen_rejected -> pairs -> train -> merge) |
 | `baselines/` | frozen v1 + v2 transcripts and delta tables (six arms) |
 | `xpu-findings.md` | Intel XPU training field report (contributed) |
+| `MODEL_ONBOARDING.md` | normative agent onboarding: required reading, authorization limits, frozen-record controls, safety testing, and box-based identity |
 | `README_SETUP.md`, `requirements.txt` | run it anywhere (cuda/xpu/cpu) |
 
 ## Comparability contract
