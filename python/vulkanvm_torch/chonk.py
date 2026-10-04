@@ -122,6 +122,69 @@ def install_chonk_allocator():
     change_current_allocator(allocator)
 
 
+def install_chonk_torch_shims():
+    """Patch torch.cuda memory-query functions to report Chonk pool truth.
+
+    WHY THIS EXISTS (2026-10-04, heretic run):
+    torch's CUDAPluggableAllocator has NO getDeviceStats implementation in
+    current builds -- it raises unconditionally ("does not yet support
+    getDeviceStats"). There is no symbol to provide and no hook to fill;
+    the limitation is in torch, not in the pool. Anything calling
+    memory_stats(), memory_allocated() or memory_reserved() dies, which
+    includes heretic (memory headroom checks at load), Accelerate
+    device_map, and HF model loading paths that query before allocating.
+
+    This patches the three functions to report pool truth
+    (totalUsed/totalAllocated) with fallback to the originals if the pool
+    is unavailable. It does not change allocation behavior.
+
+    Call after install_chonk_allocator(). Safe to call when the pool is
+    not initialized (functions fall back to torch defaults).
+    """
+    import torch
+
+    _orig_alloc = torch.cuda.memory_allocated
+    _orig_resv = torch.cuda.memory_reserved
+    _orig_stats = torch.cuda.memory_stats
+
+    def _pool():
+        try:
+            return pool_mod.stats()
+        except Exception:
+            return {}
+
+    def memory_allocated(device=None):
+        try:
+            return int(_pool().get("totalUsed", 0)) or _orig_alloc(device)
+        except Exception:
+            return _orig_alloc(device)
+
+    def memory_reserved(device=None):
+        try:
+            return int(_pool().get("totalAllocated", 0)) or _orig_resv(device)
+        except Exception:
+            return _orig_resv(device)
+
+    def memory_stats(device=None):
+        try:
+            s = _pool()
+            u, a = int(s.get("totalUsed", 0)), int(s.get("totalAllocated", 0))
+            if u or a:
+                return {"allocated_bytes.all.current": u,
+                        "allocated_bytes.all.peak": u,
+                        "reserved_bytes.all.current": a,
+                        "reserved_bytes.all.peak": a,
+                        "active_bytes.all.current": u,
+                        "active_bytes.all.peak": u}
+        except Exception:
+            pass
+        return _orig_stats(device)
+
+    torch.cuda.memory_allocated = memory_allocated
+    torch.cuda.memory_reserved = memory_reserved
+    torch.cuda.memory_stats = memory_stats
+
+
 class ChunkedPoolBuffer:
     """A logical contiguous byte region backed by multiple smaller exportable
     pool blocks. Present narrow(start, len) as a single contiguous tensor so
