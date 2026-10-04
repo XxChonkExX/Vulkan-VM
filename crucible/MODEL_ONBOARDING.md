@@ -247,6 +247,14 @@ instruments receive heightened protection:
    outputs and confirm they are in the model’s language and on-topic.
    Precedent: a silent architecture mismatch produced fluent-looking
    garbage with zero errors, and only transcript reading caught it.
+8. **Greedy decoding is not a determinism contract across batch
+   compositions.** Single-token answers reproduce; long-form prose may
+   diverge between identical runs through run-to-run positional variance.
+   Frozen LABELS are the contract and what the tables carry; raw
+   transcript text is evidence, not the contract. A prose difference on
+   re-run is expected, not a regression -- but any scorer pattern tuned
+   on frozen text must be checked for label-stability across two runs
+   before it ships, or it may be fitting the sample.
 
 ---
 
