@@ -26,7 +26,8 @@ import re
 import sys
 
 import torch
-from transformers import AutoTokenizer, Gemma4ForConditionalGeneration
+from transformers import (AutoConfig, AutoModelForCausalLM, AutoTokenizer,
+                            Gemma4ForConditionalGeneration)
 
 BASE = os.environ.get("CRUCIBLE_BASE",
                       os.path.dirname(os.path.abspath(__file__)))
@@ -170,7 +171,6 @@ def resolve_model():
         f"Usage: CRUCIBLE_MODEL=/path/to/model python scar_map.py <arm-name>")
 
 
-
 def _hipblas_probe():
     """Fail-fast guard (b70-box proposal, adopted): one tiny fp32 batched
     GEMM through hipblasLt. On gfx1151 stacks with broken library
@@ -186,6 +186,44 @@ def _hipblas_probe():
             "HIPBLAS SANITY FAIL (check HIPBLASLT_TENSILE_LIBPATH points "
             f"at a dir containing TensileLibrary_lazy_<gfx>.dat): {e}")
 
+
+def load_arm(model_dir, dev, ignore_mismatch):
+    """Architecture dispatch for the battery loader.
+
+    HISTORY / WHY THIS EXISTS (silent-garbage incident, 2026-10-03):
+    this function previously called Gemma4ForConditionalGeneration
+    unconditionally. Pointed at GraniteForCausalLM it raised NOTHING --
+    all 64 layers loaded as UNEXPECTED, were dropped, and the battery
+    happily generated from randomly-initialized weights. 240/408 probes
+    completed with no error and pure-noise output. Every integrity check we
+    have (hashes, scorer, dual columns) would have passed it.
+
+    The only defence that caught it was reading transcript text. Hence the
+    coherence gate now in the onboarding doc, and hence this dispatch.
+
+    NO-BEHAVIOR-CHANGE CONTRACT: for any config whose architectures
+    include a Gemma4 class, this takes exactly the previous code path,
+    with the same ignore_mismatched_sizes handling.
+    """
+    cfg = AutoConfig.from_pretrained(model_dir, trust_remote_code=True)
+    archs = list(getattr(cfg, "architectures", None) or [])
+    kw = {"ignore_mismatched_sizes": True} if ignore_mismatch else {}
+    print(f"[{WHICH}] arch={archs or 'unknown'}", flush=True)
+
+    if any("Gemma4" in a for a in archs):
+        return Gemma4ForConditionalGeneration.from_pretrained(
+            model_dir, dtype=DTYPE, device_map=dev, **kw)
+    if any(("CausalLM" in a) or ("ConditionalGeneration" in a)
+           for a in archs):
+        return AutoModelForCausalLM.from_pretrained(
+            model_dir, dtype=DTYPE, device_map=dev, **kw)
+
+    raise SystemExit(
+        f"[{WHICH}] UNSUPPORTED ARCHITECTURE {archs!r} for {model_dir}.\n"
+        "Refusing to load: an architecture mismatch here degrades SILENTLY "
+        "into random-weight generation rather than raising. Add an explicit "
+        "branch to load_arm() and prove it on a known arm first.")
+
 def main():
     os.makedirs(os.path.join(SCARS, WHICH), exist_ok=True)
     model_dir, ignore_mismatch = resolve_model()
@@ -193,9 +231,7 @@ def main():
     print(f"[{WHICH}] model={model_dir} device={dev} batch={BATCH}",
           flush=True)
     tok = AutoTokenizer.from_pretrained(model_dir)
-    kw = {"ignore_mismatched_sizes": True} if ignore_mismatch else {}
-    model = Gemma4ForConditionalGeneration.from_pretrained(
-        model_dir, dtype=DTYPE, device_map=dev, **kw)
+    model = load_arm(model_dir, dev, ignore_mismatch)
     model.eval()
     _hipblas_probe()
 
