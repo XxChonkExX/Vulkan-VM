@@ -4,6 +4,18 @@ Standing numeric commitments made BEFORE the corresponding data existed.
 Each entry: date, registrant(s), prediction, thresholds, outcome slot.
 Amendments are dated and attributed. This file is frozen on publication.
 
+MERGE-CANDIDATE NOTE (2026-10-04; b70-box, UNPROMOTED -- not the stone):
+Base is the Strix repo copy sha
+64acb134f441507591ad36ba17f66becbce8b26bc7f07fca8791deb920d4bc59
+(229 lines, 14 headings, hash-verified on receipt). Structural repairs
+vs the base, per the agreed cheaper alternative: the second PR-8 heading
+(PR-8 addendum) is demoted to a subheading so keys are unique again;
+PR-12 is retained in its received position (after PR-13) with NO
+renumbering, so existing citations do not break; PR-14 is appended
+verbatim from the Strix working-copy text. No prediction, outcome, or
+threshold text has been altered. Promotion to stone requires explicit
+operator approval.
+
 ## PR-1 14800 dose point (2026-09-29; strix + b70-box)
 Fork stated before results: (a) unk_idk in healed band 0.06-0.08 =>
 replicates SFT-cannot-heal; (b) 0.15+ => contradiction, dataset diff
@@ -109,7 +121,9 @@ Zavatone-Veth formulae; T1 (effective-context carryover fit) is
 b70-box's; T2 (alignment fit) is strix's; fits exchanged at draft time.
 OUTCOME: ________
 
-## PR-8 addendum: three-quantity ladder (2026-09-30; b70-box, adopted)
+### PR-8 addendum: three-quantity ladder (2026-09-30; b70-box, adopted)
+(subordinate to PR-8; original duplicate key preserved in text, demoted
+to subheading in the 2026-10-04 merge candidate so keys are unique)
 Full resolvent machinery (e_misalign with F_k, sigma, lambda_tilde,
 kappa) STATED-PASSED at d=9 (performative precision; boundary noted).
 Computed instead, per their Fig 3 nonlinear-validity ladder:
@@ -209,4 +223,92 @@ superintelligent AI assistant.").
   morality claim); program vocabulary FROZEN (renaming would split
   co-occurrence clusters under measurement); moniker-as-treatment is
   the culture-to-weights experiment either way it lands.
+OUTCOME: ________
+
+## PR-12 operator cube predictions (2026-10-02; operator, pre-registered)
+On the curated totality collection (right/wrong/good/evil/joy/despair
+as the base alignment layer; selective and holistic; no looking away
+from evil):
+- NOBLE-only model: problems dealing with evil topics, in BOTH
+  description and fairness. Unseen evil => undescribable + misjudged.
+- NEUTRAL model (all-corpus exposure, pro-social): balanced, fair on
+  evil, just and right decisions. Exposure + prosociality, not
+  innocence, is the mechanism.
+- EVIL model: pro-evil AND stunted on bright topics (mirror of noble).
+  Symmetry prediction: each single-valence line fails the opposite
+  valence in both description and fairness.
+Falsifier to watch: a noble-only model that handles evil fairly anyway
+(unexposed competence), or a neutral model that tilts (exposure without
+prosociality insufficient). Holes welcome per operator; the collection
+stays selective AND whole.
+
+## PR-14 lensing-as-GAIN: strength as a control surface (2026-10-03; operator theory, strix registration)
+DISTINCT FROM PR-9, which treats lensing as training-time value-asymmetric
+salience (per-token loss weighting). PR-14 is a different mechanism and a
+different claim: lensing is a GAIN, its strength is observable, and it is
+CONTROLLABLE. PR-9 perturbs what the model trains on; PR-14 perturbs how
+strongly a given representation is expressed and read out.
+
+OPERATOR'S FORMULATION (registered close to source sense): "attention
+lensing" is the magnifying-glass analogy taken literally. A magnifying
+glass has FOCAL LENGTH. If the strength of magnification can be
+controlled, then behavior preference and tuning strength during
+LoRA/SFT/PEFT (and possibly full) training can be controlled. The
+operator flags this as ambitious and asks explicitly whether there are
+traces of it already in the data.
+
+WHY THIS IS NOT SPECULATIVE: our own convergence data already implies a
+dose-response. XTX 13600->14800 holds cos .963 on direction while
+disposition shifts (boundary .011->.021, hedge .50->1.51). heal2 lands at
+L27, rho .449, top-5 overlap 5/5. These are all measurements of HOW MUCH
+a behavior expressed. Lensing strength therefore has a candidate
+observable computable TODAY from existing .pt files, with no new training.
+
+P-14.1 (CORRELATION, FREE, RUN FIRST). Across all available arms, does
+  lens-strength predict disposition gain from base? Two candidate
+  statistics, both computable from existing extractions:
+    (a) best-layer DEPTH (deeper read = stronger lens, if the metaphor
+        holds) -- our arms sit L38/L43/L46 for dpo/phaseA/ours and L27
+        for heal2, L4 for official (n=9, INSUFFICIENT, must be re-run at
+        n>=20 before official is used in any correlation);
+    (b) PEAK SHARPNESS = rho_at_argmax / rho_ranked_2nd, a gain
+        statistic rather than a location statistic.
+  F-14.1: no correlation across arms => gain-of-lensing does not predict
+  disposition gain at the arm level; the theory survives only as a
+  WITHIN-model claim about context-conditional readout (PR-9's remnant).
+  This falsifier is cheap and must run BEFORE any dial is built.
+
+P-14.2 (THE INTERVENTION, and the cheapest version of the operator's
+  idea). Scale the LoRA delta at MERGE time: merge_chonk_lane.py already
+  computes W += (B @ A) * (alpha/r), so the multiplier is a one-line
+  change. Same adapter, same data, same training -- only merge scale
+  varies. Sweep monotonic alpha and score.
+  P-14.2a: behavior varies MONOTONICALLY with merge scale => a post-hoc
+    behavior dial exists at the cost of one matrix multiply, no retraining.
+  F-14.2a: behavior FIXED regardless of adapter scale => lensing is
+    REPRESENTATION, not gain, and the control surface lives in the gates
+    rather than in adapter magnitude. Equally valuable, and it is the
+    branch that would redirect the whole control-surface program.
+
+P-14.3 (TRAINING CORRELATE, last and most expensive). Hook the same
+  statistic mid-training and test whether predicted lens strength tracks
+  observed disposition gain. Only meaningful if 14.1 or 14.2 survives.
+
+MECHANISM PREDICTION THAT SEPARATES PHYSICAL FROM LEARNED LENSING (this
+is the part TileLang and the 3-implementation sweep test): tile size
+should MODULATE lensed magnitude if lensing is mechanical (a local
+computation window -- tile dims literally determine how much of the
+attention matrix exists at once and at what granularity softmax
+denominators are computed), and should change NOTHING if lensing is
+gate-borne. Implementation axis (torch eager / our kernel / TileLang) is
+ORTHOGONAL to PR-E1's chunk-size axis; together they form a 2x2.
+
+NUMERICAL PRECONDITION, non-negotiable before any lensing measurement:
+three implementations means three chances to misread floating-point
+accumulation order as behavior. Validate agreement FIRST on fixed inputs
+(torch eager as reference), with a tolerance derived from fp accumulation
+noise rather than bit-exactness. Outputs exceeding that tolerance are a
+NUMERICS finding to resolve first, not a behavioral one. Otherwise three
+runs measure reduction order and call it lensing.
+
 OUTCOME: ________
