@@ -175,8 +175,13 @@ def _hipblas_probe():
     """Fail-fast guard (b70-box proposal, adopted): one tiny fp32 batched
     GEMM through hipblasLt. On gfx1151 stacks with broken library
     resolution the rope outer-product dies at probe ~1 with an opaque
-    INVALID_VALUE; this surfaces it at launch with a clear message."""
+    INVALID_VALUE; this surfaces it at launch with a clear message.
+    PORTABILITY: CUDA/HIP stacks only -- skipped when no CUDA device is
+    visible, so XPU/CPU boxes are unaffected (device="cuda" would raise
+    and misreport as a sanity failure on non-CUDA stacks)."""
     import torch
+    if not torch.cuda.is_available():
+        return
     try:
         a = torch.randn(8, 96, 1, device="cuda", dtype=torch.float32)
         b = torch.randn(8, 1, 171, device="cuda", dtype=torch.float32)
