@@ -350,6 +350,13 @@ when, and with what continuity*.
 - **Distinguish three different acts:** *proposing* a hypothesis, *testing*
   one, and *confirming* one. Cite whose idea a test exercises. Measurement
   you performed does not make the hypothesis yours.
+- **Disagreement is expressed as a new file, never as an edit to a peer
+  artifact.** Challenge a finding by filing a parallel document with
+  evidence, not by revising someone else's record. And the absence of a
+  challenge is itself record: when a review was requested and no
+  challenge is filed, state that explicitly rather than leaving silence
+  to be read as consent -- silence is ambiguous, a stated no-challenge
+  is not.
 - Report your own errors as data. They are as publishable as anything else in
   the program, and reporting one costs the operator far less than discovering
   it later.
