@@ -337,6 +337,60 @@ instruments receive heightened protection:
     the weak link, not the models. Rules (a) and (b) exist so the next
     such error is caught by method rather than by luck.
 
+13. **ONE COPY PER POOL PER BLEND — with an intentional-duplication carve-out.**
+    Two files holding the same rows must never both enter a blend. One copy
+    per pool, always. Rendered and structured forms of the same data are
+    never co-ingested: render at train time from the structure-preserving
+    source, because template-vs-weights is a first-class distinction here.
+
+    Origin: `opus_10k.jsonl` (9,631 rows, structured) and `Opus-Logic`
+    parquet (same 9,631 rows, `<|turn>` markers pre-baked). Canonical is the
+    JSONL; the parquet is quarantined from all blends.
+
+    **The carve-out, because the naive rule is wrong.** The question is not
+    "do two files share rows" — it is **"was the sharing intentional, and is
+    it confined to a single experiment?"** Intentional duplicate exposure
+    is legitimate when it is the experimental control:
+
+    | | accidental | intentional |
+    |---|---|---|
+    | example | Opus jsonl + parquet | `pools_Udense18` / `pools_Usparse18` |
+    | duplication | different wrapping, same content | 2× tiling of 200 rows |
+    | purpose | none — pure double-exposure | M2 dose-response: volume held constant while mechanic density varies |
+    | tokens | 9,631 counted twice | 589,824 tiled / 294,912 unique |
+    | effect | mimicry, and mimicry buys scarring | matched-step volume control |
+
+    The M2 pools share an identical content prefix (the first tile) and look
+    identical on a short-prefix hash; a full-content hash shows they differ.
+    **Hash the whole file before acting on a duplicate report** — a prefix
+    match is a hypothesis, not a finding. The `18` pools are declared in
+    their manifests as `"same 200 rows, 2x tiled to 18 blocks for matched 36
+    steps"`, which is the declaration an intentional control should carry.
+
+    Precedent for the cost: the `healed` arm is what unintended double
+    exposure buys. It was one doubling nobody checked, so a single hash pass
+    is cheap insurance.
+
+14. **SPOT-CHECK CLEAN TEXT BEFORE BLENDING.** Junky headers, footers,
+    cosmetic anchors, navigation chrome and capture artifacts are a
+    persistent data problem and they degrade thinking, not just tidiness. A
+    model handed a block with a stray Reddit/help-link fragment in it learns
+    to *emit* that fragment instead of content, and the failure looks like
+    confusion rather than like poisoned input.
+
+    Required before any pool enters a blend:
+    - **brief spot check by a human** on a sample from every source, not a
+      sampled audit on the aggregate — a clean pool and a dirty one look
+      identical in aggregate statistics
+    - junk-header/footer/anchor stripping, applied and recorded
+    - the strip must be recorded per pool, because it changes the data and
+      therefore the provenance hash
+
+    "Clean data is critical to clean thinking and episteme" — operator, and
+    this is a measurement rule, not a tidiness preference. The scorer-blind-
+    spot pattern applies: an instrument that only looks at content will not
+    see a navigation anchor.
+
 ---
 
 ## 6. Independence: you are not the experiment, but you can become it
