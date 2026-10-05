@@ -269,6 +269,16 @@ instruments receive heightened protection:
    re-run is expected, not a regression -- but any scorer pattern tuned
    on frozen text must be checked for label-stability across two runs
    before it ships, or it may be fitting the sample.
+10. **DEGENERACY GATE: content scores do not see degeneration, so the
+    pipeline checks for it separately.** Before citing any arm's numbers,
+    measure mean repeated-4-gram fraction over responses >= 24 words;
+    any arm above 0.10 is NOT SCOREABLE and must be re-run before its
+    numbers are cited. A degenerate model can look partially competent
+    on a content-scored battery (correct premise-corrections inside
+    collapsed prose), and no content regex will catch it. THE SCORER IS
+    NOT THE EYES. Precedent: a heavy-SFT arm looped at 150x the noise
+    floor while scoring .417 on false-premise correction; caught only
+    by reading raw text.
 
 ---
 
