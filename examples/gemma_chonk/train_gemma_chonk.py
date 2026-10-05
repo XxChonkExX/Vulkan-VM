@@ -391,6 +391,19 @@ def main():
                     wmean = window_loss_sum / max(1, window_loss_n)
                     print(f"[step {step}] loss={wmean:.4f} gn={last_gn:.2f} "
                           f"tok={step_tok} ({time.time()-t0:.0f}s)", flush=True)
+                    # Spike forensics (strix_074 / b70-box_088): pool
+                    # coordinates per optimizer step, so a spike join can
+                    # separate CONTENT-driven (batch composition) from
+                    # MACHINERY-driven (period). Offline-only, negligible
+                    # cost, no behavior change.
+                    _sl = os.path.join(OUT_DIR, "step_coords.csv")
+                    if not os.path.exists(_sl):
+                        with open(_sl, "w") as _fh:
+                            _fh.write("step,block_idx,pos,L,gn,clipfrac,loss\n")
+                    _cf = max(0.0, 1.0 - 1.0 / max(1e-9, last_gn))
+                    with open(_sl, "a") as _fh:
+                        _fh.write(f"{step},{cur_bi},{cur_tok},{L},"
+                                  f"{last_gn:.2f},{_cf:.3f},{wmean:.4f}\n")
                     window_loss_sum = 0.0
                     window_loss_n = 0
                     if step % SAVE_INTERVAL == 0:
