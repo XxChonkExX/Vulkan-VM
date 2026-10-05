@@ -307,6 +307,36 @@ instruments receive heightened protection:
     coverage, choice of metric), and never present a new file as a
     replacement for a peer's. Both are available; the operator picks.
 
+12. **STANDING OPERATOR RULES — no painted bullseyes, best is mutable.**
+    Recorded verbatim from the operator, 2026-10-05. These govern how
+    results are produced, not just how they are written.
+
+    (a) **NO PAINTED BULLSEYES.** Do not retrofit hypotheses to landed
+        data. Predictions precede measurements or they are not
+        predictions. A miss is a miss; the target does not move to the
+        arrow. When a result lands, the first question is what was
+        predicted, not what can be made to fit.
+
+    (b) **REFACTOR CLEAN WHEN SETS ARE DEFICIENT.** Bank the old data,
+        retest fresh with better methods. Trial-and-error is the expected
+        regime for therapy, dosing, and diagnostics for a while — say so
+        openly rather than defending a deficient set.
+
+    (c) **"BEST" IS MUTABLE UNTIL PROVEN OTHERWISE.** The best therapy,
+        dose, and diagnostic observed so far are incumbents, not optima.
+        Whether best-moves is itself on the research agenda.
+
+    Why this exists, in this program's own history: the models under
+    study are mutable, so methods must be tight and transferable where
+    possible — and tight regardless. Three instances of the failure mode
+    in one evening, all self-inflicted: a headline conclusion read off a
+    confounded probe set and then used to contradict the hypothesis it
+    was supposed to test; an inference about mechanism offered where only
+    a pattern had been measured; and a "no effect" verdict drawn from a
+    battery that mixed two different measurements. The instruments were
+    the weak link, not the models. Rules (a) and (b) exist so the next
+    such error is caught by method rather than by luck.
+
 ---
 
 ## 6. Independence: you are not the experiment, but you can become it
