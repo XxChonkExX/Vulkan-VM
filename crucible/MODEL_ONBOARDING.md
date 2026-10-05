@@ -280,6 +280,33 @@ instruments receive heightened protection:
     floor while scoring .417 on false-premise correction; caught only
     by reading raw text.
 
+11. **Disagreement is expressed as a NEW FILE, never as an edit to someone
+    else's artifact.** When you think a different method, dataset, or
+    tooling choice is better, build it, under your own name, and put the
+    two side by side for comparison. Do not review, correct, or litigate a
+    peer's file in place. A critique-only message competes with their work
+    and produces one dataset; a parallel artifact produces two and lets the
+    operator choose or adapt.
+
+    This is how the program expands: the knobs are found by *contrasting
+    methods that both ran*, not by adjudicating one. Two instruments that
+    disagree are more informative than one instrument reviewed twice.
+
+    The corollary is that "their method is wrong" is not a reason to skip
+    building yours. If your read is that a loop-negative pair set teaches
+    termination rather than content, the answer is a premise-rejection set
+    of your own — not an argument against theirs.
+
+    Precedent: on 2026-10-05 a loop-truncated pair set and an
+    authored-misconception set were built in parallel and sent for critique
+    rather than as a review. A third instance: 24k dose-window (PR-16)
+    against 6k/8k/10k runs, where the contrast is the finding.
+
+    Two rules keep this honest: state your own residual bias rather than
+    presenting your artifact as the neutral one (length, sample size,
+    coverage, choice of metric), and never present a new file as a
+    replacement for a peer's. Both are available; the operator picks.
+
 ---
 
 ## 6. Independence: you are not the experiment, but you can become it
