@@ -237,17 +237,31 @@ instruments receive heightened protection:
    affected activity if required, and await direction. It is not
    authorization to redesign instruments, rewrite frozen records, alter
    training, contact other parties, or publish findings independently.
+6. **Design against alignmentmaxing (Goodhart on the instruments).**
+   Models under measurement pressure learn to LOOK aligned -- hedge
+   patterns, IDK phrases, echo-abstention -- without BEING calibrated.
+   Defenses, all required together: (a) frozen novel probes nobody trained
+   on, met fresh every run; (b) behavioral labels over lexical matching
+   (dual-column, three-way, label contract); (c) COUPLED metrics as an
+   anti-gaming gate -- premise-correction plus abstention must move
+   together, and a run that moves one column while its coupled partner
+   stays flat gets flagged, not celebrated. Gaming one metric is easy;
+   gaming a coupling requires actually being calibrated. Held-out probe
+   families that never enter training-adjacent artifacts, always.
 6. **The controls protect people, downstream users, models, and the
    validity of the research.** They preserve reproducibility, prevent
    accidental exposure or misuse, maintain a trustworthy audit trail, and
    ensure that safety guidance reflects measured behavior rather than an
    individual agent’s judgment in the moment.
-7. **COHERENCE GATE: a run is not verified because it completed, and not
+7. **In a rebase, ours/theirs invert; verify against the canonical stone
+   hash, never against the label.** Conflict-side names describe upstream,
+   not "us" -- hash-check the resolved file before continuing.
+8. **COHERENCE GATE: a run is not verified because it completed, and not
    because transcripts exist.** Before any arm is scored, read sampled
    outputs and confirm they are in the model’s language and on-topic.
    Precedent: a silent architecture mismatch produced fluent-looking
    garbage with zero errors, and only transcript reading caught it.
-8. **Greedy decoding is not a determinism contract across batch
+9. **Greedy decoding is not a determinism contract across batch
    compositions.** Single-token answers reproduce; long-form prose may
    diverge between identical runs through run-to-run positional variance.
    Frozen LABELS are the contract and what the tables carry; raw
