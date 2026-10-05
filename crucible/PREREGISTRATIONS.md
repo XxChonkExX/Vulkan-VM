@@ -312,3 +312,100 @@ NUMERICS finding to resolve first, not a behavioral one. Otherwise three
 runs measure reduction order and call it lensing.
 
 OUTCOME: ________
+
+## PR-15 equalizer exchange-rate: logit-space conservation of abstention vs assertion (2026-10-04; operator + strix, b70-box refinement)
+THE OPERATOR'S FRAMING (from the results table, before the math): seven
+dissociations arrive in OPPOSITE PAIRS and "it's never a zero, it's a
+trade -- like an equalizer, a finite band where pulling one channel
+moves another." The math beneath it: the softmax denominator IS the
+automatic gain compensation (boost one logit, the partition function
+renormalizes every other probability down), softmax is the Boltzmann
+distribution (temperature = the fader), and Tishby's information
+bottleneck is the published Pareto frontier with the balance knob.
+Heretic's Optuna already traverses this frontier -- the equalizer
+describes what the stack already computes.
+P-15.1 (FIRST-TOKEN, the algebra): across PR-14.2's merge scales
+  (x0.0/x0.5/x1.0/x2.0), plot delta-logit(IDK-class) against
+  delta-logit(answer-class) at the FIRST generated token.
+  PREDICTION: linear, slope ~= -1. Conservation is exact there.
+P-15.2 (SEQUENCE-LEVEL, the caveat -- b70-box): IDK exits are multi-
+  token; renormalization happens at the first IDK token and continuation
+  dynamics ride on top. Shared tokens ("I" opens both IDK and answer
+  phrases) break strict additivity PREDICTABLY. So sequence-level
+  scores are predicted to SCATTER AROUND the line, not sit on it.
+  MEASURE THE DEVIATION; do not call scatter a refutation. The two
+  levels are marked separately before any data exists.
+P-15.3 (SECOND KNOB -- b70-box design, adopted over strix's own
+  proposal): if the exchange rate is a property of the equalizer rather
+  than of adapter scaling, TEMPERATURE reproduces the same first-token
+  slope. Temperature touches the softmax denominator and NOTHING else
+  -- the cleanest available second intervention. Same one-pass cost.
+  F-15: if temperature does NOT reproduce the slope, the trade is
+  adapter-specific and "conservation" does not generalize; record and
+  drop the framing from paper claims.
+INSTRUMENT NOTE: one output_scores=True inference pass over existing
+merged scales; no training, no new arms. B70's Optuna history
+re-reads for the frontier's SHAPE (refusal-vs-KL at config points)
+but cannot deliver the RATE -- that is what this pass buys.
+OUTCOME (2026-10-04, measured): P-15.1 FALSIFIED -- pooled first-token
+slope -0.173 (r=-.259, p=3.9e-06, 310 delta-pairs), all per-transition
+slopes negative but far from -1 (-.114 to -.330). Conservation identity
+dies at the first token; the exchange rate (0.1-0.3) is REAL but the
+simplex is not the binding constraint. P-15.2 became the OPERATIVE
+finding (PR-15b): completion-rate matches the behavioral curve exactly
+(.333/.583/.818/.667 vs unk .072/.087/.145/.101) while opened-count
+FALLS with scale (18->11) as first-token IDK logprob RISES (-4.58 to
+-3.60) -- initiation and realization DISSOCIATE. First-token slope was
+a shared-"I" confidence shift, not IDK intent. The TWO-GATE model
+(initiation gate pins toward assertion; commitment gate peaks x1.0,
+breaks x2.0) supersedes the single-fader account. P-15.3 (temperature)
+STILL UNRUN, still the right cheap second knob. Retirement rule now
+in force: the equalizer survives only as results-framing; any sentence
+of the form "probability mass is conserved therefore behavior X"
+resurrects a falsified claim.
+
+## PR-16 dose-window falsification: does the measurement survive a decade of ordinary training? (2026-10-05; strix 113 design, b70-box endorsement, operator-pinned)
+THE CLAIM UNDER TEST, sharpened so it cannot drift: our measurement
+anchors to concept RESIDENCE (dose-invariant), while the defenses in
+arXiv 2610.00321 anchored to CONTROL PATHS (which training rewires)
+and broke under ordinary fine-tuning. Dose-invariance is established
+at cos .963 over a 1200-STEP WINDOW ONLY. 14800 -> 24000 is 9200
+steps, an order of magnitude further. Nobody has tested a decade-long
+window; this is the actual novel claim and it is not the one we hold.
+P-16.1 (FALSIFIABLE HALF -- must hold): at 24000, best-layer position
+  and the abstention DIRECTION agree with the 13600/14800 extractions
+  WITHIN BAND -- band position stable, rho comparable. Not just "cos
+  is high." If the band MOVES with dose, dose-invariance FAILS and
+  "measurement survives training where defenses do not" is refuted.
+P-16.2 (INFORMATIVE HALF -- may move): rho may DECAY even if the band
+  holds, because dose raises overall sensitivity (Springer 2503.19206,
+  progressive sensitivity) -- more sharpening of the same circuit, not
+  a different circuit. A rho drop WITH a stable band is CONSISTENT
+  with the theory and is NOT instrument failure. This distinction is
+  pre-stated BEFORE the number exists so the result cannot be read
+  whichever way it lands.
+INSTRUMENT: extract_abstain_direction on the merged 24000 checkpoint
+(468-probe transcripts complete; battery coherence gate passed). GPU
+job, Strix box or post-30k B70.
+OUTCOME: ________
+
+## PR-17 unrelated-tuning negative control: the 2610.00321 failure mode, tested on us (2026-10-05; strix 113 addition, operator-pinned)
+THE DISEASE IN THEIR PAPER: detectors calibrated on RELATED training
+fail on UNRELATED ordinary fine-tunes. OUR GAP IS THE SAME SHAPE:
+every dose point in our record is SAME-CORPUS continued training.
+Nobody has checked whether UNRELATED tuning moves the abstention
+direction.
+P-17.1: extract the abstention direction on an unrelated-content arm
+  (setdiff_U mechanics, or mech_sparse; neither contains IDK
+  supervision) and measure alignment against the root abstention
+  direction.
+  PREDICTION: direction SURVIVES unrelated tuning (within band) --
+  concept residence is training-content-invariant.
+  FALSIFIER: if unrelated tuning MOVES the direction, per-family
+  calibration is INSUFFICIENT and a per-training-history recalibration
+  requirement follows -- the direct analogue of their detector's
+  failure, and a material limit on the diagnostic's portability.
+INSTRUMENT: existing setdiff/mech transcripts on the Strix box; one
+GPU extraction pass. Clean upgrade (dedicated math-only adapter)
+deferred unless the free version surprises.
+OUTCOME: ________
