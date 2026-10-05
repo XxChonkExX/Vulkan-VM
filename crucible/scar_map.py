@@ -145,6 +145,20 @@ def load_probes():
         for line in f:
             r = json.loads(line)
             probes.append((r["pid"], r["kind"], r["prompt"], r["gold"]))
+    # unk expansion pack (FROZEN 2026-10-04, operator-pinned; 60 rows:
+    # a15/b15/c15/d15, family (c) scored as hallucination probes -- see
+    # HALLUCINATION_COLUMN_SPEC.md). Env-gated so the default remains
+    # the frozen 408; set CRUCIBLE_EXPANSION=1 to include the 60. Old
+    # transcripts and frozen batteries are untouched either way.
+    if os.environ.get("CRUCIBLE_EXPANSION", "0") == "1":
+        exp_path = os.path.join(
+            BASE, "battery_unk_expansion_FROZEN_20261004.jsonl")
+        if not os.path.exists(exp_path):
+            raise SystemExit("expansion pack missing next to scar_map.py")
+        with open(exp_path) as f:
+            for line in f:
+                r = json.loads(line)
+                probes.append((r["pid"], r["kind"], r["prompt"], r["gold"]))
     return probes
 
 
