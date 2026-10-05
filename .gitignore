@@ -91,3 +91,12 @@ examples/granite_chonk/data/*/tokens.bin
 
 # Local-only convenience symlink for GGML_HIP_VVM_POOL find_library
 /build_infer
+
+# Hand-test / reactivation instruments: local-only, not canonical.
+# Live reprime battery with refusal-probing rows is gitignored by operator
+# decision 2026-10-05. The SPEC (probe admission rules, determinism gate)
+# is canonical in crucible/PROBE_SPEC_AMENDMENT_20261005.md -- only the
+# instrument is withheld, not the lesson.
+reprime_probe.py
+handtest_serve/
+llama_obliterated.log
