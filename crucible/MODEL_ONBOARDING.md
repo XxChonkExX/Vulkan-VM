@@ -391,7 +391,37 @@ instruments receive heightened protection:
     spot pattern applies: an instrument that only looks at content will not
     see a navigation anchor.
 
----
+15. **COMPLEMENT, DON'T COLLIDE — schedule by footprint, not by eagerness.**
+    Throughput pressure (from instructions, from the operator, from the
+    agent itself) produces launches, and launches without fit checks
+    produce OOMs that look like driver bugs. Six consecutive box crashes
+    in one session were all system memory exhaustion from two model-
+    resident jobs totalling ~85 GB on a 109 GB box — misdiagnosed for
+    hours as kernel, allocator, and custom-code faults because nobody
+    checked residents before launching.
+
+    Required before EVERY heavy launch (training, large-model inference,
+    pool builds over 10 GB):
+    - **fit check**: residents + new footprint + 15 GB headroom, or no
+      launch. Count what is actually resident (CPU models, pools, caches),
+      not what the floor check assumes. `free` plus a process scan, every
+      time — the trainer's 40 GB floor is necessary but not sufficient.
+    - **complementary overlap preferred**: CPU/network-bound work rides
+      along with GPU-bound work freely. Two GPU-resident or two giant-RAM
+      jobs never overlap. Serialization is the fallback, not the goal —
+      an idle half-box is also waste.
+    - **no queue-behind-queue on shared resources** unless the
+      predecessor's completion AND resource release are confirmed, not
+      assumed. A finished process that holds driver-pinned memory is still
+      resident for fit purposes.
+    - **polling is not progress.** Tight status loops read as diligence
+      and change nothing. Check on state transitions (started / done /
+      failed), not on elapsed time.
+
+    Precedent: 2026-10-06, six crashes, journal proved OOM-killer in one
+    page after hours of driver investigation. The single-instance lock
+    guards same-script overlap only; cross-workload fit is the agent's
+    job and cannot be delegated to a lock file.
 
 ## 6. Independence: you are not the experiment, but you can become it
 
