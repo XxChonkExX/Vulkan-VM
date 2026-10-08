@@ -144,10 +144,79 @@ struct PoolBlockProvider : slab::Core::IProvider {
 
     size_t warmBlocks() const { return envSizeGB("CHONK_WARM_BLOCKS", 8); }
     size_t maxBlocks() const { return envSizeGB("CHONK_MAX_BLOCKS", 24); }
+    size_t freeListMax() const { return envSizeGB("CHONK_FREE_LIST_MAX", 8); }
+
+    // Block recycling (2026-10-07, 8th). The slab retires blocks constantly --
+    // 24 x 4GB per run at span 2048 -- and every retirement is a
+    // vkFreeMemory + dma-buf close + hipDestroyExternalMemory round trip.
+    // We proved the pool side is clean (0 deferrals, 0 stranded blocks, pool
+    // flat at ~38-42GB) yet amdgpu GTT never came back down: 98.5GB GTT
+    // against a 38.0GB pool. That retention is driver-side and happens on the
+    // destroy path, so the fix is to NOT destroy. Retired blocks keep their
+    // VkDeviceMemory AND their live HIP import, so reuse needs no driver call
+    // at all: hand the same Block* back with its free list reset. Churn drops
+    // to zero after warmup and GTT plateaus at the concurrent-block high
+    // water mark instead of climbing per span.
+    //
+    // Bounded by CHONK_FREE_LIST_MAX blocks so we hold a fixed warm reserve
+    // rather than unbounded memory; beyond that, blocks take the real teardown
+    // path so the pool can still shrink.
+    std::vector<Block*> freeList_;
+
+    // Best-fit reuse: smallest recycled block that still satisfies `need`.
+    // The slab's own best-fit then treats it as any other block.
+    Block* takeRecycled(size_t need) {
+        Block* best = nullptr;
+        size_t bestSize = SIZE_MAX;
+        for (auto it = freeList_.begin(); it != freeList_.end(); ++it) {
+            if ((*it)->size >= need && (*it)->size < bestSize) {
+                best = *it;
+                bestSize = (*it)->size;
+            }
+        }
+        if (!best) return nullptr;
+        freeList_.erase(std::remove(freeList_.begin(), freeList_.end(), best),
+                        freeList_.end());
+        best->liveBytes = 0;
+        best->freeChunks.clear();
+        best->freeChunks.push_back({0, best->size});
+        return best;
+    }
+
+    // Drop recycled blocks at teardown: the slab never sees them, so nothing
+    // else will ever release their VkDeviceMemory or HIP import.
+    void releaseFreeList() {
+        for (Block* b : freeList_) {
+            // Same order as the real teardown: HIP import first, then the fd,
+            // then the Vulkan allocation. After pool.shutdown() the HIP
+            // context is gone and this is skipped deliberately -- the OS
+            // reclaims the handle.
+            if (b->extHandle && pool()) {
+                hipDestroyExternalMemory(static_cast<hipExternalMemory_t>(b->extHandle));
+            }
+            if (b->fd >= 0) close(b->fd);
+            auto it = blockAllocs_.find(b->base);
+            if (it != blockAllocs_.end() && pool()) {
+                pool()->deallocate(std::move(it->second));
+                blockAllocs_.erase(it);
+            }
+            delete b;
+        }
+        freeList_.clear();
+    }
 
     Block* createBlock(slab::Core& core, size_t need) override {
         vvm::UnifiedMemoryPool* p = pool();
         if (!p) return nullptr;
+        // Recycling first: a warm block that already holds a live HIP import
+        // costs no driver work at all, so it is always cheaper than the
+        // vkAllocateMemory -> export -> import path below. This is what keeps
+        // block churn (and therefore driver GTT retention) at zero after
+        // warmup.
+        if (Block* r = takeRecycled(need)) {
+            allocLog("U", r->base, r->size);
+            return r;
+        }
         // Size the new block to the nearest ladder rung >= max(need, minBlock).
         // For a 1 KB request with min=1 MB, we get a 1 MB block; for a 700 MB
         // request, a 1 GB block; for 14 GB, a 16 GB block. The slab's best-fit
@@ -238,6 +307,16 @@ struct PoolBlockProvider : slab::Core::IProvider {
         size_t done = 0;
         if (!pool()) return 0;
         for (auto it = pending_.begin(); it != pending_.end();) {
+            // Drain in-flight work before tearing down the import.
+            // hipDestroyExternalMemory fails while any kernel still references
+            // the memory; without this sync every retry sees the same busy
+            // import and the block is stranded in pending_ forever, leaking
+            // both its VkDeviceMemory (still in dedicatedAllocations_, so
+            // totalUsed never falls) and its HIP-side GTT mapping. This was the
+            // 80-allocations-vs-7-live-blocks gap: 73 deferred, 0 reclaimed.
+            // Blocks are destroyed rarely (not per-alloc), so a full device
+            // sync here is not a hot-path cost.
+            hipDeviceSynchronize();
             hipError_t rc = hipDestroyExternalMemory(it->ext);
             if (rc != hipSuccess) {
                 ++it;
@@ -261,7 +340,22 @@ struct PoolBlockProvider : slab::Core::IProvider {
         drainPending();
         const size_t blockSize = b->size;
         void* const base = b->base;
+        // Recycle instead of destroy while we have room in the warm reserve.
+        // Deliberately placed BEFORE the HIP teardown: the whole point is to
+        // keep the VkDeviceMemory and the live HIP import so reuse needs no
+        // driver round trip (see freeList_). Only past the cap do we take the
+        // real teardown path, so the pool can still shrink.
+        if (freeList_.size() < freeListMax()) {
+            b->liveBytes = 0;
+            b->freeChunks.clear();
+            freeList_.push_back(b);
+            allocLog("C", base, blockSize);
+            return;
+        }
         if (b->extHandle && pool()) {
+            // Clear in-flight work before releasing the import, so this
+            // succeeds and the block never enters pending_ (see drainPending).
+            hipDeviceSynchronize();
             hipError_t rc = hipDestroyExternalMemory(
                 static_cast<hipExternalMemory_t>(b->extHandle));
             if (rc != hipSuccess) {
@@ -346,6 +440,10 @@ void chonk_allocator_free(void* ptr, size_t size, void* stream) {
 
 void vvm_torch_chonk_allocator_reset() {
     core().reset();
+    // The slab only knows about blocks it still owns; recycled blocks live
+    // only in the provider's free list. Without this they would keep their
+    // VkDeviceMemory and HIP import alive for the whole process lifetime.
+    provider().releaseFreeList();
 }
 
 size_t vvm_torch_chonk_allocator_release_empty(size_t keepFloor) {
