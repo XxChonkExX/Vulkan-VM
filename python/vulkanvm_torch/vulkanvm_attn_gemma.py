@@ -38,11 +38,10 @@ _QCHUNK = int(os.environ.get("CHONK_Q_CHUNK", "4096"))
 _KTILE = int(os.environ.get("CHONK_ATTN_TILE", "8192"))
 
 
-# Active KV-cache registry for sequence-chunked training (truncated BPTT,
-# Qwen-recipe port 2026-10-07). Module level (NOT class level): the trainer
-# imports set_active_kv_cache directly. The live DynamicCache is set before
-# each chunked micro; the dispatcher stashes (cache, layer_idx) in ctx so
-# backward can source cached-span k/v values with ZERO extra retention.
+# Active KV-cache registry for sequence-chunked training (truncated BPTT).
+# Module level (NOT class level): the trainer imports set_active_kv_cache
+# directly. The dispatcher stashes (cache, layer_idx) in ctx so backward can
+# source cached-span k/v values with ZERO extra retention.
 # None = legacy full-sequence path (bit-identical behavior).
 _ACTIVE_CACHE = None
 
@@ -50,6 +49,115 @@ _ACTIVE_CACHE = None
 def set_active_kv_cache(cache):
     global _ACTIVE_CACHE
     _ACTIVE_CACHE = cache
+
+
+# ---------------------------------------------------------------------------
+# Span cache
+# ---------------------------------------------------------------------------
+# Why this is NOT HF's DynamicCache: transformers' GradientCheckpointingLayer
+# hard-nulls past_key_values while training (modeling_layers.py:94-97), and for
+# good reason -- DynamicLayer.update is append-only (`torch.cat`, cache_utils.py),
+# so it is NOT idempotent. Letting the checkpointed forward populate it would
+# append every span twice (once under no_grad, once during recompute) and
+# silently corrupt the cache. Un-nulling HF's cache is therefore not a fix.
+#
+# So we own the cache and commit it exactly once per span, OUTSIDE the
+# checkpointed region:
+#   1. trainer: begin_span()          -- clear staging
+#   2. forward:  stage(idx, k, v)     -- idempotent overwrite each pass
+#   3. trainer: commit_span(cache)    -- append once per layer per span
+#
+# The prefix is consumed DETACHED, so no gradient crosses a span boundary:
+# that is the truncation, and it is what makes this truncated BPTT rather than
+# full-sequence attention with extra steps.
+#
+# Sliding-window layers are cropped to their window on commit. Gemma4 is 40
+# sliding (1024) + 8 full out of 48; without the crop a 32k document would
+# retain full-length k/v for all 40 sliding layers.
+
+class _LayerKV:
+    __slots__ = ("keys", "values")
+
+    def __init__(self):
+        self.keys = None
+        self.values = None
+
+
+class SpanCache:
+    """Cross-span KV state, one entry per layer. Deliberately not a
+    transformers Cache subclass: HF indexes layers by cache-slot, collapsing
+    shared-KV layers onto one slot, which does not line up with layer_idx."""
+
+    def __init__(self, n_layers, layer_windows=None):
+        self.layers = [_LayerKV() for _ in range(n_layers)]
+        # 0 = full attention (grow unbounded); >0 = sliding window size.
+        self.layer_windows = list(layer_windows or [0] * n_layers)
+
+    def prefix_len(self, idx):
+        if not (0 <= idx < len(self.layers)):
+            return 0
+        k = self.layers[idx].keys
+        return 0 if k is None else int(k.shape[2])
+
+    def get_prefix(self, idx):
+        if not (0 <= idx < len(self.layers)):
+            return None, None
+        e = self.layers[idx]
+        return e.keys, e.values
+
+    def append(self, idx, k, v):
+        if not (0 <= idx < len(self.layers)):
+            return
+        e = self.layers[idx]
+        if e.keys is None:
+            e.keys, e.values = k, v
+        else:
+            e.keys = torch.cat([e.keys, k], dim=2)
+            e.values = torch.cat([e.values, v], dim=2)
+        w = self.layer_windows[idx] if idx < len(self.layer_windows) else 0
+        if w and w > 0 and e.keys.shape[2] > w:
+            e.keys = e.keys[:, :, -w:].contiguous()
+            e.values = e.values[:, :, -w:].contiguous()
+
+    def reset(self):
+        for e in self.layers:
+            e.keys = None
+            e.values = None
+
+    def nbytes(self):
+        tot = 0
+        for e in self.layers:
+            if e.keys is not None:
+                tot += e.keys.numel() * e.keys.element_size()
+                tot += e.values.numel() * e.values.element_size()
+        return tot
+
+
+# Per-span staging: layer_idx -> (k, v) detached. The dispatcher writes here on
+# every pass (including checkpoint recompute, where it rewrites identical
+# values, so it stays idempotent); the trainer commits once per span.
+_SPAN_STAGING = {}
+
+# Per-layer attention window, filled in by patch_gemma_attention_tiled().
+_LAYER_WINDOWS = []
+
+
+def make_span_cache(n_layers):
+    """Build a SpanCache whose sliding-layer crops match the live patch."""
+    return SpanCache(n_layers, _LAYER_WINDOWS)
+
+
+def begin_span():
+    _SPAN_STAGING.clear()
+
+
+def commit_span(cache):
+    n = 0
+    for idx, (k, v) in _SPAN_STAGING.items():
+        cache.append(idx, k, v)
+        n += 1
+    _SPAN_STAGING.clear()
+    return n
 
 
 class GemmaAttnTiled(torch.autograd.Function):
@@ -221,7 +329,7 @@ class GemmaAttnTiled(torch.autograd.Function):
             if ctx.cache is not None:
                 _ll = (ctx.cache.layers[ctx.lidx]
                        if ctx.lidx < len(ctx.cache.layers) else None)
-                if _ll is not None and _ll.keys is not None:
+                if _ll is not None and _ll.keys is not None and off > 0:
                     ck = _ll.keys[:, :, :off].detach()
                     cv = _ll.values[:, :, :off].detach()
             if ck is None:
@@ -271,14 +379,14 @@ class GemmaAttnTiled(torch.autograd.Function):
                     vt = cv[:, :, k0:k1]
                 elif k0 >= off:
                     kt = kc[:, :, k0 - off:k1 - off]
-                    vt = cv[:, :, k0 - off:k1 - off]
+                    vt = vc[:, :, k0 - off:k1 - off]
                 else:
                     # Straddling tile (off not KT-aligned): one small
                     # transient cat per occurrence, freed per iteration.
                     kt = torch.cat([ck[:, :, k0:off],
                                     kc[:, :, 0:k1 - off]], dim=2)
                     vt = torch.cat([cv[:, :, k0:off],
-                                    cv[:, :, 0:k1 - off]], dim=2)
+                                    vc[:, :, 0:k1 - off]], dim=2)
                 s = torch.matmul(
                     qg, kt.unsqueeze(2).transpose(-2, -1)) * ctx.scaling
                 if ctx.softcap > 0:
@@ -310,7 +418,7 @@ class GemmaAttnTiled(torch.autograd.Function):
         return (
             dq.to(qdt).reshape(B, H, Tq, D),
             dk.to(qdt),
-            dv.to(v.dtype),
+            dv.to(vs.dtype),
             None, None, None, None, None, None,
         )
 
@@ -330,6 +438,10 @@ def patch_gemma_attention_tiled(model):
     cfg = txt.config if hasattr(txt, "config") else base.config
     layer_types = list(getattr(cfg, "layer_types", ["full_attention"] * 48))
     sw = int(getattr(cfg, "sliding_window", 0) or 0)
+    # Publish the per-layer windows so the trainer can build a SpanCache with
+    # matching crop behaviour instead of re-parsing the config.
+    _LAYER_WINDOWS[:] = [sw if str(t).lower().startswith("sliding") else 0
+                          for t in layer_types]
 
     try:
         import transformers.models.gemma4.modeling_gemma4 as gm
@@ -362,12 +474,25 @@ def patch_gemma_attention_tiled(model):
         g = int(getattr(module, "num_key_value_groups",
                         query.shape[1] // key.shape[1]))
         softcap = float(kwargs.get("softcap", 0.0) or 0.0)
-        # Sequence-chunked path: q is the current chunk, k/v are cache+chunk.
-        # off comes from SHAPES (robust under grad-ckpt recompute, which
-        # replays chunk-time cats while the registry holds the full cache).
-        off = key.shape[2] - query.shape[2]
+        # Cross-span path. HF hands us ONLY the current span's k/v (its cache
+        # is nulled under gradient checkpointing), so we prepend the
+        # accumulated prefix here. The prefix is DETACHED: gradient does not
+        # cross the span boundary, which is precisely the truncation. The
+        # backward pass re-reads the same prefix straight from the cache by
+        # slice, so it stays correct even as the cache keeps growing.
         cache = _ACTIVE_CACHE
-        out = GemmaAttnTiled.apply(query, key, value, float(scaling),
+        off = 0
+        fk, fv = key, value
+        if cache is not None and 0 <= idx < len(cache.layers):
+            pk, pv = cache.get_prefix(idx)
+            if pk is not None and pk.shape[2] > 0:
+                off = int(pk.shape[2])
+                fk = torch.cat([pk.detach(), key], dim=2)
+                fv = torch.cat([pv.detach(), value], dim=2)
+            # Stage this span's own k/v for the trainer to commit AFTER the
+            # span returns -- never inside the checkpointed region.
+            _SPAN_STAGING[idx] = (key.detach(), value.detach())
+        out = GemmaAttnTiled.apply(query, fk, fv, float(scaling),
                                    softcap, window, off, cache, idx)
         return out, None
 
