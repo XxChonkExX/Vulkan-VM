@@ -38,6 +38,20 @@ _QCHUNK = int(os.environ.get("CHONK_Q_CHUNK", "4096"))
 _KTILE = int(os.environ.get("CHONK_ATTN_TILE", "8192"))
 
 
+# Active KV-cache registry for sequence-chunked training (truncated BPTT,
+# Qwen-recipe port 2026-10-07). Module level (NOT class level): the trainer
+# imports set_active_kv_cache directly. The live DynamicCache is set before
+# each chunked micro; the dispatcher stashes (cache, layer_idx) in ctx so
+# backward can source cached-span k/v values with ZERO extra retention.
+# None = legacy full-sequence path (bit-identical behavior).
+_ACTIVE_CACHE = None
+
+
+def set_active_kv_cache(cache):
+    global _ACTIVE_CACHE
+    _ACTIVE_CACHE = cache
+
+
 class GemmaAttnTiled(torch.autograd.Function):
     """Tiled exact causal attention (training, full block, no cache).
 
@@ -52,8 +66,14 @@ class GemmaAttnTiled(torch.autograd.Function):
     """
 
     @staticmethod
-    def forward(ctx, q, k, v, scaling, softcap, window):
-        B, H, T, D = q.shape
+    def forward(ctx, q, k, v, scaling, softcap, window, off=0, cache=None,
+                lidx=-1):
+        B, H, Tq, D = q.shape
+        Tk = k.shape[2]
+        if off is None:
+            off = Tk - Tq
+        # off = cached prefix length (0 = legacy full-sequence: Tk == Tq).
+        # q rows live at absolute positions [off, off+Tq); k/v span [0, Tk).
         kvH = k.shape[1]
         g = H // kvH
         QC, KT = _QCHUNK, _KTILE
@@ -64,28 +84,45 @@ class GemmaAttnTiled(torch.autograd.Function):
         ctx.window = int(window)
         ctx.n_groups = int(g)
         ctx.qchunk, ctx.ktile = QC, KT
-        ctx.save_for_backward(q, k, v)
+        ctx.off = int(off)
+        ctx.Tk = int(Tk)
+        ctx.cache = cache
+        ctx.lidx = int(lidx)
+        if cache is None:
+            # Legacy path: save full tensors (zero behavior change).
+            ctx.save_for_backward(q, k, v)
+            ctx.split = False
+        else:
+            # Split saves (truncated-BPTT port): clone ONLY the current
+            # chunk's k/v rows (small); the cached span is sourced from the
+            # live cache in backward (zero extra retention -- same shape as
+            # the vulkanvm_autograd split-path fix, Qwen 131K line).
+            kc = k[:, :, off:off + Tq].clone()
+            vc = v[:, :, off:off + Tq].clone()
+            ctx.save_for_backward(q, kc, vc)
+            ctx.split = True
 
         with torch.no_grad():
-            qg_full = q.view(B, kvH, g, T, D)
-            m = torch.full((B, kvH, g, T), float("-inf"),
+            qg_full = q.view(B, kvH, g, Tq, D)
+            m = torch.full((B, kvH, g, Tq), float("-inf"),
                            device=dev, dtype=torch.float32)
-            l = torch.zeros(B, kvH, g, T, device=dev, dtype=torch.float32)
-            acc = torch.zeros(B, kvH, g, T, D, device=dev,
+            l = torch.zeros(B, kvH, g, Tq, device=dev, dtype=torch.float32)
+            acc = torch.zeros(B, kvH, g, Tq, D, device=dev,
                               dtype=torch.float32)
-            out = torch.empty(B, H, T, D, device=dev, dtype=q.dtype)
+            out = torch.empty(B, H, Tq, D, device=dev, dtype=q.dtype)
 
-            n_qchunks = (T + QC - 1) // QC
+            n_qchunks = (Tq + QC - 1) // QC
             for cq in range(n_qchunks):
-                q0, q1 = cq * QC, min((cq + 1) * QC, T)
+                q0, q1 = cq * QC, min((cq + 1) * QC, Tq)
                 qc = q1 - q0
                 qg = qg_full[:, :, :, q0:q1, :]          # view
-                # k-tile range visible to this q-chunk
+                # k-tile range visible to this q-chunk (ABSOLUTE positions).
+                # Causal: no tile starts at/after absolute q1 = off + q1.
                 if ctx.window > 0:
-                    k_lo = max(0, (q0 - ctx.window) // KT * KT)
+                    k_lo = max(0, (off + q0 - ctx.window) // KT * KT)
                 else:
                     k_lo = 0
-                k_hi = q1  # causal: no tile starts at/after q1
+                k_hi = min(Tk, off + q1)
                 mq = m[:, :, :, q0:q1]
                 lq = l[:, :, :, q0:q1]
                 accq = acc[:, :, :, q0:q1, :]
@@ -110,8 +147,10 @@ class GemmaAttnTiled(torch.autograd.Function):
                               f"qstride={tuple(qg.stride())} "
                               f"kshape={tuple(kt.shape)} scaling={ctx.scaling}",
                               flush=True)
-                    # analytic causal + window mask for this cell
-                    qp = torch.arange(q0, q1, device=dev).view(-1, 1)
+                    # analytic causal + window mask for this cell.
+                    # qp ABSOLUTE (off-shifted); kp absolute. off=0 falls
+                    # out to the legacy relative behavior bit-identically.
+                    qp = torch.arange(q0, q1, device=dev).view(-1, 1) + off
                     kp = torch.arange(k0, k1, device=dev).view(1, -1)
                     ok = kp <= qp
                     if ctx.window > 0:
@@ -156,29 +195,60 @@ class GemmaAttnTiled(torch.autograd.Function):
 
     @staticmethod
     def backward(ctx, dout):
-        q, k, v = ctx.saved_tensors
+        q, ks, vs = ctx.saved_tensors
         m = ctx.m_final
         l = ctx.l_final
         out = ctx.out
-        B, H, T, D = q.shape
-        kvH = k.shape[1]
+        B, H, Tq, D = q.shape
+        kvH = ks.shape[1]
         g = ctx.n_groups
         QC, KT = ctx.qchunk, ctx.ktile
         dev, qdt = q.device, q.dtype
+        if ctx.split:
+            # Split saves: ks/vs are the current chunk's k/v clones;
+            # cached-span values come from the live cache (zero extra
+            # retention -- the cache outlives every chunk regardless).
+            # Prefix rows are append-only: values read now equal chunk-time.
+            off, Tk = ctx.off, ctx.Tk
+            # Bind the current chunk's k/v FIRST and unconditionally. The
+            # tile loop below indexes kc/vc for every tile at or past `off`,
+            # so when the cache actually populated (len(layers) > 0) this
+            # branch previously set only ck/cv and left kc/vc unbound --
+            # a NameError on the first cached tile. It stayed hidden while
+            # the cache was always empty and every call took the miss path.
+            kc, vc = ks, vs
+            ck = cv = None
+            if ctx.cache is not None:
+                _ll = (ctx.cache.layers[ctx.lidx]
+                       if ctx.lidx < len(ctx.cache.layers) else None)
+                if _ll is not None and _ll.keys is not None:
+                    ck = _ll.keys[:, :, :off].detach()
+                    cv = _ll.values[:, :, :off].detach()
+            if ck is None:
+                # Shared-KV layer (no dedicated cache slot) or cache miss:
+                # no usable prefix, so restrict to the current slice only.
+                # off=0 makes every tile take the `k0 >= off` branch below.
+                off = 0
+                Tk = ks.shape[2]
+        else:
+            # Legacy path: saved full tensors (identical to old code).
+            off, Tk = 0, q.shape[2]
+            ck = cv = kc = vc = None
+            k, v = ks, vs
 
-        qg_full = q.view(B, kvH, g, T, D)
-        dyg = dout.view(B, kvH, g, T, D)
+        qg_full = q.view(B, kvH, g, Tq, D)
+        dyg = dout.view(B, kvH, g, Tq, D)
         delta = (dyg.float() *
-                 out.view(B, kvH, g, T, D).float()).sum(dim=-1)
+                 out.view(B, kvH, g, Tq, D).float()).sum(dim=-1)
         inv_l = (1.0 / l).unsqueeze(-1)
 
-        dq = torch.zeros(B, kvH, g, T, D, device=dev, dtype=torch.float32)
-        dk = torch.zeros(B, kvH, T, D, device=dev, dtype=torch.float32)
-        dv = torch.zeros(B, kvH, T, D, device=dev, dtype=torch.float32)
+        dq = torch.zeros(B, kvH, g, Tq, D, device=dev, dtype=torch.float32)
+        dk = torch.zeros(B, kvH, Tk, D, device=dev, dtype=torch.float32)
+        dv = torch.zeros(B, kvH, Tk, D, device=dev, dtype=torch.float32)
 
-        n_qchunks = (T + QC - 1) // QC
+        n_qchunks = (Tq + QC - 1) // QC
         for cq in range(n_qchunks):
-            q0, q1 = cq * QC, min((cq + 1) * QC, T)
+            q0, q1 = cq * QC, min((cq + 1) * QC, Tq)
             qg = qg_full[:, :, :, q0:q1, :]
             dyg_c = dyg[:, :, :, q0:q1, :]
             delta_c = delta[:, :, :, q0:q1]
@@ -187,19 +257,34 @@ class GemmaAttnTiled(torch.autograd.Function):
             dq_c = torch.zeros(B, kvH, g, q1 - q0, D, device=dev,
                                dtype=torch.float32)
             if ctx.window > 0:
-                k_lo = max(0, (q0 - ctx.window) // KT * KT)
+                k_lo = max(0, (off + q0 - ctx.window) // KT * KT)
             else:
                 k_lo = 0
-            for k0 in range(k_lo, q1, KT):
-                k1 = min(k0 + KT, q1)
-                kt = k[:, :, k0:k1]
-                vt = v[:, :, k0:k1]
+            k_hi = min(Tk, off + q1)
+            for k0 in range(k_lo, k_hi, KT):
+                k1 = min(k0 + KT, k_hi)
+                if not ctx.split:
+                    kt = k[:, :, k0:k1]
+                    vt = v[:, :, k0:k1]
+                elif k1 <= off:
+                    kt = ck[:, :, k0:k1]
+                    vt = cv[:, :, k0:k1]
+                elif k0 >= off:
+                    kt = kc[:, :, k0 - off:k1 - off]
+                    vt = cv[:, :, k0 - off:k1 - off]
+                else:
+                    # Straddling tile (off not KT-aligned): one small
+                    # transient cat per occurrence, freed per iteration.
+                    kt = torch.cat([ck[:, :, k0:off],
+                                    kc[:, :, 0:k1 - off]], dim=2)
+                    vt = torch.cat([cv[:, :, k0:off],
+                                    cv[:, :, 0:k1 - off]], dim=2)
                 s = torch.matmul(
                     qg, kt.unsqueeze(2).transpose(-2, -1)) * ctx.scaling
                 if ctx.softcap > 0:
                     s = torch.tanh(s.float() / ctx.softcap) * ctx.softcap
                 s_f = s.float()
-                qp = torch.arange(q0, q1, device=dev).view(-1, 1)
+                qp = torch.arange(q0, q1, device=dev).view(-1, 1) + off
                 kp = torch.arange(k0, k1, device=dev).view(1, -1)
                 ok = kp <= qp
                 if ctx.window > 0:
@@ -223,10 +308,10 @@ class GemmaAttnTiled(torch.autograd.Function):
             dq[:, :, :, q0:q1, :] = dq_c
 
         return (
-            dq.to(qdt).reshape(B, H, T, D),
+            dq.to(qdt).reshape(B, H, Tq, D),
             dk.to(qdt),
             dv.to(v.dtype),
-            None, None, None,
+            None, None, None, None, None, None,
         )
 
 
@@ -277,8 +362,13 @@ def patch_gemma_attention_tiled(model):
         g = int(getattr(module, "num_key_value_groups",
                         query.shape[1] // key.shape[1]))
         softcap = float(kwargs.get("softcap", 0.0) or 0.0)
+        # Sequence-chunked path: q is the current chunk, k/v are cache+chunk.
+        # off comes from SHAPES (robust under grad-ckpt recompute, which
+        # replays chunk-time cats while the registry holds the full cache).
+        off = key.shape[2] - query.shape[2]
+        cache = _ACTIVE_CACHE
         out = GemmaAttnTiled.apply(query, key, value, float(scaling),
-                                   softcap, window)
+                                   softcap, window, off, cache, idx)
         return out, None
 
     gm.eager_attention_forward = patched
