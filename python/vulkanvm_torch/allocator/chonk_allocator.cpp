@@ -144,7 +144,12 @@ struct PoolBlockProvider : slab::Core::IProvider {
 
     size_t warmBlocks() const { return envSizeGB("CHONK_WARM_BLOCKS", 8); }
     size_t maxBlocks() const { return envSizeGB("CHONK_MAX_BLOCKS", 24); }
-    size_t freeListMax() const { return envSizeGB("CHONK_FREE_LIST_MAX", 8); }
+    size_t freeListMax() const {
+        // Default 32: measured peak concurrency at raw-32k was 18 blocks.
+        // A reserve smaller than peak concurrency cannot absorb a working-set
+        // spike, which is exactly when it is needed. Overridable.
+        return envSizeGB("CHONK_FREE_LIST_MAX", 32);
+    }
 
     // Block recycling (2026-10-07, 8th). The slab retires blocks constantly --
     // 24 x 4GB per run at span 2048 -- and every retirement is a
@@ -237,6 +242,23 @@ struct PoolBlockProvider : slab::Core::IProvider {
         desc.name = "torch_segment";
         auto allocOpt = p->allocate(desc);
         if (!allocOpt) {
+            // Driver refused a new block. BEFORE escalating (which asks the
+            // driver for MORE memory and fails harder), serve the request from
+            // the recycle reserve: those blocks hold live VkDeviceMemory and a
+            // live HIP import and need no driver call at all. This is the fix
+            // for the 2026-10-08 crash -- vkAllocateMemory returned
+            // VK_ERROR_OUT_OF_DEVICE_MEMORY on a 4GB request at 102.8/121GB
+            // GTT (nominal headroom, but no contiguous region), and the old
+            // path went releaseEmptyBlocks -> escalate -> nullptr without ever
+            // consulting freeList_, so a satisfied-by-reserve request died.
+            if (Block* r = takeRecycled(need)) {
+                fprintf(stderr,
+                        "[allocator] driver OOM: served %zu bytes from recycle "
+                        "reserve (%zu block(s) held)\n",
+                        need, freeList_.size() + 1);
+                allocLog("U", r->base, r->size);
+                return r;
+            }
             // Pressure relief: release fully-free blocks down to a warm
             // floor, then retry once before escalating.
             size_t released = core.releaseEmptyBlocks(minBlocksOnOOM);
@@ -248,10 +270,19 @@ struct PoolBlockProvider : slab::Core::IProvider {
             if (!allocOpt) {
                 // Escalate to the nearest configured bucket, bounded by
                 // need + slack (escalating far past a driver OOM just
-                // thrashes the allocator).
+                // thrashes the allocator). Re-check the reserve first: if the
+                // driver cannot give us the rung we want, a recycled block
+                // still beats a failed vkAllocateMemory.
                 size_t bucketSize = roundToBucket(need);
                 size_t slack = escalateSlackGB * 1024ull * 1024ull * 1024ull;
                 if (bucketSize > blockSize && bucketSize <= need + slack) {
+                    if (Block* r = takeRecycled(bucketSize)) {
+                        fprintf(stderr,
+                                "[allocator] driver OOM (escalation): served "
+                                "%zu bytes from recycle reserve\n", bucketSize);
+                        allocLog("U", r->base, r->size);
+                        return r;
+                    }
                     fprintf(stderr, "[allocator] pressure: escalating %zu -> %zu bucket\n",
                             blockSize, bucketSize);
                     desc.size = bucketSize;
