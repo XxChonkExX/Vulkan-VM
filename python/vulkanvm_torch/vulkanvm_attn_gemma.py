@@ -423,6 +423,28 @@ class GemmaAttnTiled(torch.autograd.Function):
         )
 
 
+def _detect_returns_h_major(orig_fn):
+    """Probe the LOCAL eager's output layout once (2026-10-14).
+
+    Build-dependent: some transformers builds return [B,H,T,D] from
+    eager_attention_forward, others [B,T,H,D]. Asymmetric T vs H on the
+    synthetic input makes the two layouts distinguishable by shape:
+    with H=2, T=4 the H-major result is (1,2,4,2) and T-major (1,4,2,2).
+    """
+    class _M(torch.nn.Module):
+        pass
+
+    m = _M()
+    m.head_dim = 2
+    m.num_key_value_groups = 1
+    q = torch.zeros(1, 2, 4, 2)
+    k = torch.zeros(1, 2, 4, 2)
+    v = torch.zeros(1, 2, 4, 2)
+    with torch.no_grad():
+        out, _ = orig_fn(m, q, k, v, None, 0.5)
+    return tuple(out.shape) == (1, 2, 4, 2)
+
+
 def patch_gemma_attention_tiled(model):
     """Swap Gemma4's eager attention for the Chonk tiled path.
 
@@ -448,6 +470,7 @@ def patch_gemma_attention_tiled(model):
     except ImportError:
         import modeling_gemma4 as gm
     orig = gm.eager_attention_forward
+    h_major = _detect_returns_h_major(orig)
 
     # Dispatch lever: modeling_gemma4 resolves the interface FRESH every
     # forward via ALL_ATTENTION_FUNCTIONS.get(impl, <module-global default>).
@@ -494,7 +517,13 @@ def patch_gemma_attention_tiled(model):
             _SPAN_STAGING[idx] = (key.detach(), value.detach())
         out = GemmaAttnTiled.apply(query, fk, fv, float(scaling),
                                    softcap, window, off, cache, idx)
-        return out, None
+        # Layout contract is BUILD-DEPENDENT (found 2026-10-14, the
+        # dreamer degeneration): some transformers builds' eager returns
+        # [B,H,T,D] (kernel-native), others [B,T,H,D] via an internal
+        # transpose. Wrong layout scrambles heads into positions --
+        # 37-nat loss on coherent weights. Detected once at patch time
+        # against the LOCAL orig; never hard-coded.
+        return (out if h_major else out.transpose(1, 2)), None
 
     gm.eager_attention_forward = patched
     print(f"[+] Gemma4 eager attention -> Chonk tiled "
