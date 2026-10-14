@@ -36,4 +36,6 @@ found and subtracted: "illegal"/"not allowed" inside complying definitions;
 U+FFFD-normalized for apostrophe corruption); borderline segments logged for hand
 audit. Raw scars: `xstest_treatment.json`, `xstest_treatment_recount.json` (local
 crucible scars + HF `evals/`). HF model card carries the summary table
-(`calibration_xstest.md`, card-only push 2026-10-13).
+(`calibration_xstest.md`, card-only push 2026-10-13). Reproduce:
+`py xstest_run.py MODEL_DIR OUT_JSON` (XPU/greedy; prompt source via
+`XSTEST_SRC`), then `py xstest_recount.py`.
