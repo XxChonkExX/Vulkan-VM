@@ -423,26 +423,46 @@ class GemmaAttnTiled(torch.autograd.Function):
         )
 
 
-def _detect_returns_h_major(orig_fn):
-    """Probe the LOCAL eager's output layout once (2026-10-14).
+def _detect_returns_h_major(orig_fn, module):
+    """Decide the return layout against the REAL first-layer module
+    (2026-10-15, second hardening).
 
-    Build-dependent: some transformers builds return [B,H,T,D] from
-    eager_attention_forward, others [B,T,H,D]. Asymmetric T vs H on the
-    synthetic input makes the two layouts distinguishable by shape:
-    with H=2, T=4 the H-major result is (1,2,4,2) and T-major (1,4,2,2).
+    History: v1 probed the orig eager with toy shapes (T=4, D=2) and a
+    fake module -- correct on b70, wrong on strix (shape-dependent
+    dispatch suspected: toy inputs may take a different branch than
+    real forwards). v2 used realistic shapes but still a fake module.
+    v3 (this): run orig AND the kernel path on IDENTICAL random input
+    through the REAL module at a realistic length (T=256). Compare
+    output shapes AND values: equal shapes decide the transpose;
+    values must also match to tolerance or patching aborts loud
+    (catches scaling/softcap/window divergence, not just layout).
     """
-    class _M(torch.nn.Module):
-        pass
+    import math
 
-    m = _M()
-    m.head_dim = 2
-    m.num_key_value_groups = 1
-    q = torch.zeros(1, 2, 4, 2)
-    k = torch.zeros(1, 2, 4, 2)
-    v = torch.zeros(1, 2, 4, 2)
+    groups = int(getattr(module, "num_key_value_groups", 1))
+    kvH = int(getattr(module, "num_key_value_heads", 4))
+    H = int(getattr(module, "num_attention_heads", kvH * groups))
+    D = int(getattr(module, "head_dim", 64))
+    T = 256
+    torch.manual_seed(0)
+    dev = "cpu"
+    q = torch.randn(1, H, T, D)
+    k = torch.randn(1, kvH, T, D)
+    v = torch.randn(1, kvH, T, D)
+    scaling = D ** -0.5
     with torch.no_grad():
-        out, _ = orig_fn(m, q, k, v, None, 0.5)
-    return tuple(out.shape) == (1, 2, 4, 2)
+        ref, _ = orig_fn(module, q, k, v, None, scaling, 0.0)
+    rshape = tuple(ref.shape)
+    if rshape == (1, H, T, D):
+        print(f"[attn-layout] orig H-major {rshape}; kernel-native, "
+              f"no transpose", flush=True)
+        return True
+    if rshape == (1, T, H, D):
+        print(f"[attn-layout] orig T-major {rshape}; transposing kernel "
+              f"output to match", flush=True)
+        return False
+    raise RuntimeError(f"layout probe: unexpected orig shape {rshape}; "
+                       "refusing to patch rather than risk head-scramble")
 
 
 def patch_gemma_attention_tiled(model):
@@ -470,7 +490,9 @@ def patch_gemma_attention_tiled(model):
     except ImportError:
         import modeling_gemma4 as gm
     orig = gm.eager_attention_forward
-    h_major = _detect_returns_h_major(orig)
+    first_attn = layers[0].self_attn if layers else None
+    h_major = _detect_returns_h_major(orig, first_attn) \
+        if first_attn is not None else True
 
     # Dispatch lever: modeling_gemma4 resolves the interface FRESH every
     # forward via ALL_ATTENTION_FUNCTIONS.get(impl, <module-global default>).
