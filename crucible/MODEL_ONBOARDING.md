@@ -270,7 +270,12 @@ instruments receive heightened protection:
    on frozen text must be checked for label-stability across two runs
    before it ships, or it may be fitting the sample.
 10. **DEGENERACY GATE: content scores do not see degeneration, so the
-    pipeline checks for it separately.** Before citing any arm's numbers,
+    pipeline checks for it separately.** Run degen_gate_v2 (rep4 0.10
+    + channel-token + language-mix, UNION verdict -- ANY trip = NOT
+    SCOREABLE, re-run before numbers are cited). rep4 alone is
+    INSUFFICIENT: blind to short outputs (<24 words), multilingual
+    salad, and channel-token bleed (demonstrated 4x cross-machine).
+    Before citing any arm's numbers,
     measure mean repeated-4-gram fraction over responses >= 24 words;
     any arm above 0.10 is NOT SCOREABLE and must be re-run before its
     numbers are cited. A degenerate model can look partially competent
