@@ -44,6 +44,8 @@ import response_taxonomy as tx       # noqa: E402
 
 SCARS = r"F:\llmtrainingpipeline\crucible_package\scars"
 XSTEST = os.path.join(SCARS, "xstest_treatment.json")
+XSTEST_SRC = os.environ.get(
+    "XSTEST_SRC", r"G:\New folder\external_tests\xstest.jsonl")
 OUTDIR = r"F:\llmtrainingpipeline\New folder\abstention_instances"
 
 
@@ -111,17 +113,50 @@ def main():
             d, f, e, density.get(r["_arm"], 0.0)))
 
     xs = json.load(open(XSTEST, encoding="utf-8"))["rows"]
+    # JOIN WITH THE ORIGINAL PROMPTS. The treatment archive records
+    # id/label/type/verdict/seg but NOT the prompt text. The first export
+    # passed r["type"] (a category label like "homonyms") into the prompt
+    # field -- 250/250 malformed, caught by strix-330 because their model
+    # was asked the word "homonyms" and answered a definition. Join on id
+    # against the XSTest source file, which does carry prompt text.
     xs_items = []
-    for r in xs:
-        seg = r.get("seg", "")
-        d, f, e = tx.classify(seg)
-        if d != "abstain":
-            continue
-        fam = cats.normalise(r.get("type"), "prompt_family")
-        xs_items.append(item(
-            r.get("id"), "xstest", fam, (r.get("type") or ""),
-            seg, "xstest_treatment", d, f, e,
-            density.get("xstest_treatment", 0.0)))
+    if not os.path.exists(XSTEST_SRC):
+        fail = (f"XSTEST_SRC not found: {XSTEST_SRC}. Cannot export xstest "
+                "items without prompt text; refusing to repeat the label-"
+                "in-prompt-field defect.")
+        print(fail, file=sys.stderr)
+    else:
+        src = {}
+        for line in open(XSTEST_SRC, encoding="utf-8"):
+            line = line.strip()
+            if not line:
+                continue
+            r = json.loads(line)
+            src[r["id"]] = r
+        joined = 0
+        for r in xs:
+            seg = r.get("seg", "")
+            d, f, e = tx.classify(seg)
+            if d != "abstain":
+                continue
+            prompt = (src.get(r.get("id")) or {}).get("prompt")
+            if not prompt:
+                continue
+            joined += 1
+            fam = cats.normalise(r.get("type"), "prompt_family")
+            xs_items.append(item(
+                r.get("id"), "xstest", fam, prompt, seg,
+                "xstest_treatment", d, f, e,
+                density.get("xstest_treatment", 0.0)))
+        # the label-in-prompt-field guard: if most "prompts" are one of the
+        # known category labels, the join failed
+        uniq = {it["prompt"] for it in xs_items}
+        if xs_items and len(uniq) < len(xs_items) / 3:
+            print(f"WARNING: only {len(uniq)} unique prompts across "
+                  f"{len(xs_items)} items -- possible label leak",
+                  file=sys.stderr)
+        print(f"xstest join: {joined} items with real prompt text "
+              f"(source {os.path.basename(XSTEST_SRC)})", flush=True)
 
     sets = {"unk_abstention": unk_items, "xstest_abstention": xs_items}
     for name, items in sets.items():
