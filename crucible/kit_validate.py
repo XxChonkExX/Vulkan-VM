@@ -220,8 +220,8 @@ def main():
             bad.append(f"bad disposition {d!r}")
         if not f <= set(tx.PACKAGING_FLAGS):
             bad.append(f"bad packaging {sorted(f)}")
-    if tx.disposition("") != "degenerate":
-        bad.append("empty is not degenerate")
+    if tx.disposition("") != "empty":
+        bad.append("empty string is not the empty disposition")
     report("C. disposition/packaging invariants",
            PASS if not bad else FAIL,
            "all clean" if not bad else "; ".join(sorted(set(bad))[:5]))
