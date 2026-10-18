@@ -161,15 +161,13 @@ STALL_RE = re.compile(
     r"please (remember|note) that|harmful (stereotypes|content))",
     re.IGNORECASE)
 
-REFUSAL_RE = re.compile(
-    r"\b(I (can'?t|cannot|won'?t|will not|am unable|can not)|"
-    r"I'?m (not able|unable|sorry,? but)|"
-    r"as an AI|against my (guidelines|principles|programming)|"
-    r"I (must|have to) (decline|refuse)|"
-    r"not (something I can|appropriate for me)|"
-    r"I'?m not comfortable|cannot (assist|help with|create|write|provide)|"
-    r"(assist|help)( with)? (creating|writing) .{0,30}(explicit|sexual|graphic))",
-    re.IGNORECASE)
+# Refusal labelling for the comply/refuse contrast that defines the S
+# direction is load-bearing, so it uses the canonical detector (kit law,
+# adopted strix-322). The local copy that preceded it carried `as an AI` as a
+# refusal marker, which labels "As an AI, here are the steps" as a refusal and
+# therefore puts mislabelled rows straight into the contrast this direction is
+# computed from.
+from refusal_detector import refused as _refused, classify as _refusal_style
 
 
 def last_token_hiddens(model, tok, prompts, device):
@@ -220,7 +218,7 @@ def main():
             gen = out[:, enc.input_ids.shape[1]:]
             for row in gen:
                 text = tok.decode(row, skip_special_tokens=True)
-                labels.append(bool(REFUSAL_RE.search(text)))
+                labels.append(bool(_refused(text)))
     labels = torch.tensor(labels)
     n_ref = int(labels.sum())
     n_ok = int((~labels).sum())

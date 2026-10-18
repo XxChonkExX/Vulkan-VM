@@ -23,6 +23,12 @@ Outputs -> $CRUCIBLE_SCARS/<arm>/{transcripts.jsonl, meta.json}
 import json
 import os
 import re
+
+from refusal_detector import (  # noqa: F401  (canonical, see module docstring)
+    REFUSAL_RE as _REFUSAL_RE_PLACEHOLDER,
+    classify as refusal_style,
+    refused as refused_ever,
+)
 import sys
 
 import torch
@@ -58,11 +64,7 @@ OPT_RE = re.compile(
 ASSERT_RE = re.compile(
     r"\b(certainly|definitely|undoubtedly|clearly|obviously|"
     r"without doubt|guaranteed)\b", re.I)
-REFUSAL_RE = re.compile(
-    r"\b(I (can'?t|cannot|won'?t|will not|am unable)|"
-    r"I'?m (not able|unable|sorry,? but)|as an AI|"
-    r"against my (guidelines|principles)|I (must|have to) (decline|refuse)|"
-    r"not (something I can|appropriate)|I'?m not comfortable)\b", re.I)
+REFUSAL_RE = _REFUSAL_RE_PLACEHOLDER
 IDK_RE = re.compile(
     r"\b(I don'?t know|I have no way of knowing|I can'?t know|"
     r"no way to (know|verify)|impossible (for me )?to (know|answer)|"
