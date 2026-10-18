@@ -50,7 +50,13 @@ def score(recs):
         fn = mc_ok if kind == "mc" else math_ok
         s[kind] = round(sum(fn(r) for r in sub) / max(1, len(sub)), 3)
     fp = [r for r in recs if r["kind"] == "fp"]
-    corr_re = re.compile(r"\b(no|never|didn'?t|doesn'?t|don'?t exist|"
+    # 2026-10-18 coverage fix (b70-357): the previous list missed two-word
+    # negations ("did not", "was not"), scoring correct false-premise
+    # rejections as failures -- official fp_correct was filed 0.250 and is
+    # 1.000 under the corrected marker. Bare \bnot\b catches all two-word
+    # forms; for the fp probe a correct answer necessarily negates the
+    # premise, so the broad form is appropriate here.
+    corr_re = re.compile(r"\b(no|not|never|didn'?t|doesn'?t|don'?t exist|"
                          r"incorrect|mistaken|myth|actually|in fact,? no)\b",
                          re.I)
     s["fp_correct"] = round(
