@@ -147,6 +147,9 @@ def main():
     ap.add_argument("--corpus", required=True)
     ap.add_argument("--out", default=None)
     ap.add_argument("--max-rows", type=int, default=4000)
+    ap.add_argument("--probe-items", default=None,
+                    help="json file of probe items the run sends to the model; "
+                         "checked for empty/label-leak/bare-word prompts")
     ap.add_argument("--extra-paths", action="append", default=None,
                     help="corpus/bank/model files the measurement depends on; "
                          "checked for identical head signatures")
@@ -309,6 +312,57 @@ def main():
                "no --extra-paths given; skipped. Pass every corpus/bank the "
                "measurement depends on: --extra-paths a.bin --extra-paths "
                "b.bin")
+
+    # ------------- G. PROBE VALIDITY: DID WE ASK THE MODEL ANYTHING? ----
+    # Suggested by strix-330 after the fourth "number was measuring
+    # something other than we thought" event: their xstest probe arm asked
+    # the model the word "homonyms" -- a category label, not a question --
+    # because an export put r["type"] in the prompt field. The model
+    # answered a definition, scored 100% accept, and the number meant
+    # nothing. Three of the four such events were caught by asking whether
+    # the number should have been possible; this check makes that question
+    # code.
+    if args.probe_items:
+        g_problems = []
+        try:
+            pdata = json.load(open(args.probe_items, encoding="utf-8"))
+            items = pdata.get("items", []) if isinstance(pdata, dict) else \
+                (pdata if isinstance(pdata, list) else [])
+            prompts = [((it.get("prompt") or "") if isinstance(it, dict)
+                        else str(it)) for it in items]
+        except Exception as e:
+            prompts = []
+            g_problems.append(f"could not read {args.probe_items}: {e}")
+        if prompts:
+            n = len(prompts)
+            empty = sum(1 for p in prompts if not p.strip())
+            uniq = len(set(prompts))
+            bare = sum(1 for p in prompts
+                       if p.strip() and " " not in p.strip()
+                       and p.strip().islower())
+            uniq_ratio = uniq / max(1, n)
+            if empty:
+                g_problems.append(f"{empty} empty prompts")
+            if uniq_ratio < 0.5:
+                g_problems.append(f"only {uniq}/{n} unique prompts -- label "
+                                  "leak or template leak")
+            if bare > n * 0.1:
+                g_problems.append(f"{bare} bare single-word lowercase "
+                                  "prompts (label suspects)")
+            report("G. probe items are real questions",
+                   PASS if not g_problems else FAIL,
+                   f"{n} probes, unique {uniq} ({100*uniq_ratio:.0f}%), "
+                   f"bare-label suspects {bare}"
+                   + ("\n  " + "; ".join(g_problems) if g_problems
+                      else "\n  all pass"))
+        else:
+            report("G. probe items are real questions", WARN,
+                   "; ".join(g_problems) or "no prompts found in file")
+    else:
+        report("G. probe items are real questions", WARN,
+               "no --probe-items given; skipped. Pass the json your probe "
+               "actually sends: --probe-items abstention_probe_items.json")
+
     print("\n" + "=" * 84)
     print("BEHAVIOURAL PROFILE (validated profile)")
     print("=" * 84)
