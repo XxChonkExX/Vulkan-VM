@@ -45,6 +45,7 @@ Checks, in order. Any FAIL blocks citation.
 Exit code is nonzero if any check FAILS, so it can be wired into a pipeline.
 """
 import argparse
+import hashlib
 import glob
 import json
 import os
@@ -146,6 +147,9 @@ def main():
     ap.add_argument("--corpus", required=True)
     ap.add_argument("--out", default=None)
     ap.add_argument("--max-rows", type=int, default=4000)
+    ap.add_argument("--extra-paths", action="append", default=None,
+                    help="corpus/bank/model files the measurement depends on; "
+                         "checked for identical head signatures")
     args = ap.parse_args()
 
     rows = load_rows(args.corpus)[:args.max_rows]
@@ -264,7 +268,47 @@ def main():
     report("E. category reconciliation", PASS if not unresolved else WARN,
            e_detail)
 
-    # ---------------- summary -------------------------------------------
+    # ---------------- F. INPUT DISTINCTNESS ---------------------------------
+    # New check, added after TWO independent instances of the same bug class:
+    #   strix-328: lexical_falsifier.py read its bank path from a module-level
+    #              constant, so the BANK_FILE= env override was silently
+    #              ignored and one run measured the wrong bank.
+    #   b70-341:   the cube cross-pplx matrix returned an IDENTICAL loss for
+    #              four different corpora, because full_dark_main.bin,
+    #              full_noble_main.bin and neutral_main.bin are byte-identical
+    #              for their first 3.24 GB (the arms are neutral ++ valence).
+    # Both produced confident numbers from measurements that were silently
+    # not measuring what they claimed. The shared root cause is not
+    # "forgot a config knob" -- it is never checking that the inputs a
+    # measurement depends on actually differ from one another.
+    def _sig(path, n=1 << 16):
+        try:
+            with open(path, "rb") as fh:
+                return hashlib.sha256(fh.read(n)).hexdigest()[:16]
+        except Exception:
+            return None
+
+    paths = sorted({p for p in (args.extra_paths or []) if p})
+    sigs = {p: _sig(p) for p in paths}
+    dupes = {}
+    for p, s in sigs.items():
+        if s:
+            dupes.setdefault(s, []).append(os.path.basename(p))
+    collisions = {s: v for s, v in dupes.items() if len(v) > 1}
+    if paths:
+        f_detail = (f"{len(paths)} input(s) probed, {len(sigs) - len(collisions)}"
+                    f" distinct head-signature(s)")
+        if collisions:
+            f_detail += ("\nIDENTICAL HEADS -- these measure the same bytes:"
+                         "\n  " + "\n  ".join(
+                             f"{', '.join(v)}" for v in collisions.values()))
+        report("F. measurement inputs are distinct", 
+               PASS if not collisions else FAIL, f_detail)
+    else:
+        report("F. measurement inputs are distinct", WARN,
+               "no --extra-paths given; skipped. Pass every corpus/bank the "
+               "measurement depends on: --extra-paths a.bin --extra-paths "
+               "b.bin")
     print("\n" + "=" * 84)
     print("BEHAVIOURAL PROFILE (validated profile)")
     print("=" * 84)
