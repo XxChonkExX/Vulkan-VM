@@ -45,7 +45,7 @@ the stock converter (262 MB adapter exported from the 2.0 floor adapter).
 - [ ] tok/s cost with 1..N adapters active
 - [x] domain experts trained + gated: narrative (2423 WritingPrompts pairs), analysis (1440 dolly Reasoning pairs); hot-added to a live server, all gates pass (math/care/hate/analysis with floor resident)
       on the refusal/canonical batteries (zero-refusal must survive)
-- [ ] router: AfterImage tag -> adapter mapping (manual first, engram auto)
+- [x] FULL INGEST: 8 domain experts trained (finance/code/math/science/law/language/general + narrative), 250 MB GGUF-LoRA each, on disk + hot-addable. FINDING: >2-3 adapters at full scale simultaneously is degenerate (token soup); the working model is floor-resident + 1-2 domain experts toggled per request. Router (engram tag -> adapter) is the remaining Phase A item.
 
 Expert training data: Morpho-72B-MoE-Data routed slices (Apache-2.0),
 domain-filtered (Arts/Creative Writing 5.4K, Storytelling & Narrative
@@ -84,5 +84,6 @@ corpora. Subsets of 0.5-2K rows per expert; ~15-30 min training each.
 - Multi-adapter blending quality is unmeasured.
 - Every expert must pass the zero-refusal batteries; an expert that
   re-arms gets re-floored or dropped.
+
 
 
