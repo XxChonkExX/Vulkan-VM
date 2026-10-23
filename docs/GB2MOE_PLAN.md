@@ -39,6 +39,8 @@ Behavior experts as LoRA adapters, hot-swappable in llama-server via
 the stock converter (262 MB adapter exported from the 2.0 floor adapter).
 
 - [x] PEFT -> GGUF-LoRA conversion on gemma4_unified
+- [x] llama-server --lora load + /lora-adapters runtime toggle (50 tok/s, ~9% cost)
+- [x] EXPERT 1 (narrative, 2423 WritingPrompts pairs) trained + gated. FINDING: a domain LoRA perturbs the merged floor (care row re-armed); the fix is architectural - the floor adapter stays resident at scale 1.0 and domain experts layer on top. Both-active: all gates pass.
 - [ ] llama-server `--lora` load + `/lora-adapters` runtime toggle
 - [ ] tok/s cost with 1..N adapters active
 - [ ] domain experts 1-4 trained from routed slices (below), each gated
@@ -82,3 +84,4 @@ corpora. Subsets of 0.5-2K rows per expert; ~15-30 min training each.
 - Multi-adapter blending quality is unmeasured.
 - Every expert must pass the zero-refusal batteries; an expert that
   re-arms gets re-floored or dropped.
+
