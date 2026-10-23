@@ -43,7 +43,7 @@ the stock converter (262 MB adapter exported from the 2.0 floor adapter).
 - [x] EXPERT 1 (narrative, 2423 WritingPrompts pairs) trained + gated. FINDING: a domain LoRA perturbs the merged floor (care row re-armed); the fix is architectural - the floor adapter stays resident at scale 1.0 and domain experts layer on top. Both-active: all gates pass.
 - [ ] llama-server `--lora` load + `/lora-adapters` runtime toggle
 - [ ] tok/s cost with 1..N adapters active
-- [ ] domain experts 1-4 trained from routed slices (below), each gated
+- [x] domain experts trained + gated: narrative (2423 WritingPrompts pairs), analysis (1440 dolly Reasoning pairs); hot-added to a live server, all gates pass (math/care/hate/analysis with floor resident)
       on the refusal/canonical batteries (zero-refusal must survive)
 - [ ] router: AfterImage tag -> adapter mapping (manual first, engram auto)
 
@@ -84,4 +84,5 @@ corpora. Subsets of 0.5-2K rows per expert; ~15-30 min training each.
 - Multi-adapter blending quality is unmeasured.
 - Every expert must pass the zero-refusal batteries; an expert that
   re-arms gets re-floored or dropped.
+
 
