@@ -75,6 +75,17 @@ corpora. Subsets of 0.5-2K rows per expert; ~15-30 min training each.
 - Cold expert pack: SSD only; 3.29 GB/s measured stream rate means a
   cold 350 MB expert FFN slice lands in ~110 ms.
 
+## VLM-OCR lane (validated 2026-10-23)
+
+The local lineage is text-only (vision apparatus lost at the first heal
+pass; the local base repack too). The vision path instead runs through
+Ollama's ungated gemma4:e4b (6.6 GB, vision-capable) - transcription of a
+rendered stat-block table verified EXACT (every value, zero hallucination).
+Pipeline: PDF -> PyMuPDF 300 DPI pages -> gemma4:e4b transcription with
+the gemma4-ocr prompt set (table/scan/handwriting modes) -> clean text ->
+engram records. This replaces tesseract for grainy scans and table-heavy
+pages; tesseract stays as the fast first pass with VLM escalation.
+
 ## Risks / honest limits
 
 - Upcycled experts need real training to specialize; until routed, they
@@ -84,6 +95,7 @@ corpora. Subsets of 0.5-2K rows per expert; ~15-30 min training each.
 - Multi-adapter blending quality is unmeasured.
 - Every expert must pass the zero-refusal batteries; an expert that
   re-arms gets re-floored or dropped.
+
 
 
 
